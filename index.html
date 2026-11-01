@@ -683,7 +683,7 @@ body{margin:0}
         if (lm) {
           const pc = palmPoint(lm);                           // centre of the palm: steady whether open or closed
           const tx = clamp01(((1 - pc.x) - .15) / .7) * r.width;     // mirrored, centre of the frame fills the board
-          const ty = clamp01((pc.y - .15) / .65) * r.height;
+          const ty = clamp01((pc.y - .3125) / .325) * r.height;   // vertical: half the hand movement covers the whole board
           if (!sm.ok) { sm.x = tx; sm.y = ty; sm.ok = true; } else { sm.x += (tx - sm.x) * .55; sm.y += (ty - sm.y) * .55; }
           ptr.x = sm.x; ptr.y = sm.y; ptr.on = true;
           hist.push({ x: sm.x, y: sm.y, t: now });
