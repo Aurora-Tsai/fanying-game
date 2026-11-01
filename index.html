@@ -238,7 +238,7 @@ body{margin:0}
           <button class="chip" id="m-mouse" data-mode="mouse" aria-pressed="true"><span class="big">滑鼠模式</span><span class="small">用滑鼠或手指點</span></button>
           <button class="chip" id="m-cam" data-mode="cam" aria-pressed="false"><span class="big">體感模式</span><span class="small">用相機看你的手</span></button>
         </div>
-        <p class="tip" id="camTip" hidden>站在鏡頭前，伸出<b>食指</b>當鎚子，<b>手往下揮一下</b>就是敲。第一次開啟要等幾秒鐘。</p>
+        <p class="tip" id="camTip" hidden>站在鏡頭前，<b>張開手</b>移動鎚子，對準玩偶後<b>握拳</b>就是敲。第一次開啟要等幾秒鐘。</p>
         <p class="err" id="camErr" hidden></p>
       </div>
 
@@ -674,18 +674,18 @@ body{margin:0}
         const lm = res && res.landmarks && res.landmarks[0];
         const r = board.getBoundingClientRect();
         if (lm) {
-          const tip = lm[8];                                  // index fingertip
-          const tx = clamp01(((1 - tip.x) - .12) / .76) * r.width;   // mirrored, centre of the frame fills the board
-          const ty = clamp01((tip.y - .1) / .75) * r.height;
+          const pc = palmPoint(lm);                           // centre of the palm: steady whether open or closed
+          const tx = clamp01(((1 - pc.x) - .15) / .7) * r.width;     // mirrored, centre of the frame fills the board
+          const ty = clamp01((pc.y - .15) / .65) * r.height;
           if (!sm.ok) { sm.x = tx; sm.y = ty; sm.ok = true; } else { sm.x += (tx - sm.x) * .55; sm.y += (ty - sm.y) * .55; }
           ptr.x = sm.x; ptr.y = sm.y; ptr.on = true;
           hist.push({ x: sm.x, y: sm.y, t: now });
           while (hist.length && now - hist[0].t > 260) hist.shift();
           if (onGame) { placeHammer(r.left + sm.x, r.top + sm.y); hammer.hidden = false; }
-          if (S.running) detectWhack(now, r);
+          detectFist(lm, now, r);
           camHint.hidden = true;
         } else {
-          sm.ok = false; ptr.on = false; hist.length = 0; hammer.hidden = true;
+          sm.ok = false; ptr.on = false; hist.length = 0; hammer.hidden = true; openFrames = 0;
           camHint.hidden = !onGame;
         }
       }
@@ -693,19 +693,31 @@ body{margin:0}
     };
     camRaf = requestAnimationFrame(step);
   }
-  function detectWhack(now, r) {
-    if (now - lastWhack < 380 || hist.length < 3) return;
-    let past = hist[0];
-    for (const h of hist) if (now - h.t >= 110) past = h;
-    const dt = (now - past.t) / 1000;
-    if (dt < .06) return;
-    if ((sm.y - past.y) / dt > r.height * 1.2) {        // a quick downward swing
-      lastWhack = now;
-      const aim = hist[0];                              // where the hammer was before the swing
-      swingAt(r.left + aim.x, r.top + aim.y, 'cam');
-      strikeAt(aim.x, aim.y);
-      hist.length = 0;
-    }
+  // Fist = at least three of the four fingers curled (tip closer to the wrist than its middle joint).
+  let openFrames = 0, closed = false;
+  const d2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  function palmPoint(lm) {
+    const ids = [0, 5, 9, 13, 17];
+    return { x: ids.reduce((t, i) => t + lm[i].x, 0) / 5, y: ids.reduce((t, i) => t + lm[i].y, 0) / 5 };
+  }
+  function isFist(lm) {
+    const w = lm[0];
+    let curled = 0;
+    [[8, 6], [12, 10], [16, 14], [20, 18]].forEach(([tip, pip]) => { if (d2(lm[tip], w) < d2(lm[pip], w) * 1.05) curled++; });
+    return curled >= 3;
+  }
+  function detectFist(lm, now, r) {
+    const fist = isFist(lm);
+    if (!fist) { openFrames++; if (openFrames >= 2) closed = false; return; }
+    openFrames = 0;
+    if (closed) return;                                   // already closed: wait for the hand to open again
+    closed = true;
+    if (!S.running || now - lastWhack < 250) return;
+    lastWhack = now;
+    let aim = hist[hist.length - 1];                      // where the hammer was just before the hand closed
+    for (const h of hist) if (now - h.t >= 90) aim = h;
+    swingAt(r.left + aim.x, r.top + aim.y, 'cam');
+    strikeAt(aim.x, aim.y);
   }
 
   // ---------- Timer ----------
