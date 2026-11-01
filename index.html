@@ -193,6 +193,11 @@ body{margin:0}
 .go:disabled{opacity:.7; font-size:22px; letter-spacing:.05em}
 .cam{position:fixed; right:max(12px, env(safe-area-inset-right, 0px)); bottom:max(12px, env(safe-area-inset-bottom, 0px));
   width:170px; aspect-ratio:4/3; object-fit:cover; transform:scaleX(-1); border:4px solid var(--trim); border-radius:14px; z-index:40; background:var(--pit)}
+.camstate{position:fixed; right:max(12px, env(safe-area-inset-right, 0px)); bottom:calc(max(12px, env(safe-area-inset-bottom, 0px)) + 140px);
+  width:170px; text-align:center; z-index:41; background:var(--panel); color:var(--cream); border:2px solid var(--panel-2);
+  border-radius:10px; padding:3px 0; font-weight:900; font-size:15px}
+.camstate[data-s="握拳"]{background:var(--bad); border-color:var(--bad)}
+.camstate[data-s="張開"]{background:var(--board); border-color:var(--board)}
 .camhint{position:absolute; left:50%; top:12px; translate:-50% 0; z-index:9; background:var(--scrim); color:var(--cream);
   padding:6px 14px; border-radius:999px; font-weight:700; pointer-events:none; white-space:nowrap}
 </style>
@@ -309,6 +314,7 @@ body{margin:0}
 </div>
 
 <video class="cam" id="cam" playsinline muted hidden></video>
+<div class="camstate" id="camState" hidden>找不到手</div>
 
 <div class="hammer" id="hammer" hidden aria-hidden="true">
   <svg viewBox="0 0 100 100">
@@ -635,8 +641,8 @@ body{margin:0}
 
   // ---------- Camera mode (hand tracking) ----------
   const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
-  const MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
-  const video = $('#cam'), camHint = $('#camHint');
+  const MODEL = 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
+  const video = $('#cam'), camHint = $('#camHint'), camState = $('#camState');
   let landmarker = null, stream = null, camRaf = 0, lastVT = -1, lastWhack = 0;
   const hist = [], sm = { x: 0, y: 0, ok: false };
   const clamp01 = v => Math.max(0, Math.min(1, v));
@@ -650,17 +656,18 @@ body{margin:0}
     if (!landmarker) {
       const vision = await import(MP + '/vision_bundle.mjs');
       const files = await vision.FilesetResolver.forVisionTasks(MP + '/wasm');
-      const opts = d => ({ baseOptions: { modelAssetPath: MODEL, delegate: d }, runningMode: 'VIDEO', numHands: 1 });
-      try { landmarker = await vision.HandLandmarker.createFromOptions(files, opts('GPU')); }
-      catch (e) { landmarker = await vision.HandLandmarker.createFromOptions(files, opts('CPU')); }
+      const opts = d => ({ baseOptions: { modelAssetPath: MODEL, delegate: d }, runningMode: 'VIDEO', numHands: 1,
+        minHandDetectionConfidence: .4, minHandPresenceConfidence: .4, minTrackingConfidence: .4 });
+      try { landmarker = await vision.GestureRecognizer.createFromOptions(files, opts('GPU')); }
+      catch (e) { landmarker = await vision.GestureRecognizer.createFromOptions(files, opts('CPU')); }
     }
-    video.hidden = false;
+    video.hidden = false; camState.hidden = false;
     camLoop();
   }
   function stopCamera() {
     cancelAnimationFrame(camRaf);
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-    video.hidden = true; camHint.hidden = true; sm.ok = false; ptr.on = false; hist.length = 0;
+    video.hidden = true; camState.hidden = true; camHint.hidden = true; sm.ok = false; ptr.on = false; hist.length = 0;
   }
   function camLoop() {
     cancelAnimationFrame(camRaf);
@@ -670,7 +677,7 @@ body{margin:0}
         lastVT = video.currentTime;
         const now = performance.now();
         let res = null;
-        try { res = landmarker.detectForVideo(video, now); } catch (e) {}
+        try { res = landmarker.recognizeForVideo(video, now); } catch (e) {}
         const lm = res && res.landmarks && res.landmarks[0];
         const r = board.getBoundingClientRect();
         if (lm) {
@@ -682,10 +689,12 @@ body{margin:0}
           hist.push({ x: sm.x, y: sm.y, t: now });
           while (hist.length && now - hist[0].t > 260) hist.shift();
           if (onGame) { placeHammer(r.left + sm.x, r.top + sm.y); hammer.hidden = false; }
-          detectFist(lm, now, r);
+          const world = res.worldLandmarks && res.worldLandmarks[0];
+          const g = res.gestures && res.gestures[0] && res.gestures[0][0];
+          detectFist(world || lm, g, now, r);
           camHint.hidden = true;
         } else {
-          sm.ok = false; ptr.on = false; hist.length = 0; hammer.hidden = true; openFrames = 0;
+          sm.ok = false; ptr.on = false; hist.length = 0; hammer.hidden = true; openFrames = 0; fistFrames = 0; showHandState('');
           camHint.hidden = !onGame;
         }
       }
@@ -693,29 +702,41 @@ body{margin:0}
     };
     camRaf = requestAnimationFrame(step);
   }
-  // Fist = at least three of the four fingers curled (tip closer to the wrist than its middle joint).
-  let openFrames = 0, closed = false;
-  const d2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  // Fist detection. Two signals vote:
+  //  1. the trained gesture model ("Closed_Fist" / "Open_Palm"),
+  //  2. how far the fingertips reach from the palm, in 3D, divided by the palm's own size
+  //     (works for small hands and turned hands). The "open" reference adapts to each player.
+  let openFrames = 0, fistFrames = 0, closed = false, openRef = 1.15;
+  const d3 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
   function palmPoint(lm) {
     const ids = [0, 5, 9, 13, 17];
     return { x: ids.reduce((t, i) => t + lm[i].x, 0) / 5, y: ids.reduce((t, i) => t + lm[i].y, 0) / 5 };
   }
-  function isFist(lm) {
-    const w = lm[0];
-    let curled = 0;
-    [[8, 6], [12, 10], [16, 14], [20, 18]].forEach(([tip, pip]) => { if (d2(lm[tip], w) < d2(lm[pip], w) * 1.05) curled++; });
-    return curled >= 3;
+  function reach(w) {
+    const ids = [0, 5, 9, 13, 17];
+    const c = { x: 0, y: 0, z: 0 };
+    ids.forEach(i => { c.x += w[i].x / 5; c.y += w[i].y / 5; c.z += (w[i].z || 0) / 5; });
+    const palm = d3(w[0], w[9]) || 1;
+    return [8, 12, 16, 20].reduce((t, i) => t + d3(w[i], c), 0) / 4 / palm;
   }
-  function detectFist(lm, now, r) {
-    const fist = isFist(lm);
-    if (!fist) { openFrames++; if (openFrames >= 2) closed = false; return; }
-    openFrames = 0;
-    if (closed) return;                                   // already closed: wait for the hand to open again
+  function showHandState(t) { camState.textContent = t ? '手：' + t : '找不到手'; camState.dataset.s = t; }
+  function detectFist(w, g, now, r) {
+    const ratio = reach(w);
+    const cat = g && g.score > .4 ? g.categoryName : '';
+    if (cat === 'Open_Palm' || (!closed && ratio > openRef * .8)) openRef = Math.min(1.6, Math.max(.9, openRef * .97 + ratio * .03));
+    const closeT = openRef * .58, openT = openRef * .76;
+    const fistVote = cat === 'Closed_Fist' || (ratio < closeT && cat !== 'Open_Palm');
+    const openVote = cat === 'Open_Palm' || (ratio > openT && cat !== 'Closed_Fist');
+    if (fistVote) { fistFrames++; openFrames = 0; }
+    else if (openVote) { openFrames++; fistFrames = 0; }
+    if (closed && openFrames >= 2) closed = false;          // hand opened again: ready for the next hit
+    showHandState(closed || fistFrames >= 2 ? '握拳' : '張開');
+    if (closed || fistFrames < 2) return;                   // two fist frames in a row, so a flicker doesn't count
     closed = true;
     if (!S.running || now - lastWhack < 250) return;
     lastWhack = now;
-    let aim = hist[hist.length - 1];                      // where the hammer was just before the hand closed
-    for (const h of hist) if (now - h.t >= 90) aim = h;
+    let aim = hist[hist.length - 1];                        // where the hammer was just before the hand closed
+    for (const h of hist) if (now - h.t >= 140) aim = h;
     swingAt(r.left + aim.x, r.top + aim.y, 'cam');
     strikeAt(aim.x, aim.y);
   }
