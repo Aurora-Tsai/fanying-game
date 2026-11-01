@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>反應遊戲</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Noto+Sans+TC:wght@500;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Huninn&display=swap">
+<style>
+/* Layout: a night-shift toy-factory arcade. Menu card first, then a hazard-striped frame around a 3x4 board of holes with the HUD on top. Single deliberate dark look. */
+:root{
+  --night:#1C1940; --night-dot:#26225200;
+  --panel:#2B2657; --panel-2:#3A3474;
+  --board:#2E8C7E; --board-hi:#3AA391; --pit:#110F28; --pit-rim:#1F6E63;
+  --trim:#FFC93C; --trim-dk:#C9921A;
+  --cream:#FFF4E0; --muted:#BDB6E6;
+  --good:#8CF08C; --bad:#FF6B5B; --bad-dk:#C9473A;
+  --arm:#9B6BFF; --arm-dk:#6A43C8; --arm-hi:#C4A8FF;
+  --ghost-glow:rgba(214,226,255,.85);
+  --scrim:rgba(17,15,40,.86);
+  --f-display:"Huninn","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+  --f-body:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+  --f-num:"Baloo 2","Noto Sans TC",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{
+  background:var(--night);
+  background-image:radial-gradient(circle at 1px 1px, var(--panel) 1.5px, transparent 0);
+  background-size:22px 22px;
+  color:var(--cream); font-family:var(--f-body); font-size:16px; line-height:1.55;
+  -webkit-tap-highlight-color:transparent;
+}
+.app{
+  min-height:100%; display:flex; flex-direction:column; align-items:center;
+  padding-block:18px 28px;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap{width:100%; max-width:560px; display:flex; flex-direction:column; gap:18px}
+button{font:inherit; color:inherit; cursor:pointer}
+button:focus-visible{outline:3px solid var(--trim); outline-offset:3px}
+
+/* ---------- Menu ---------- */
+.head{display:flex; flex-direction:column; gap:4px}
+.eyebrow{font-size:13px; letter-spacing:.12em; color:var(--trim); font-weight:700}
+h1{
+  margin:0; font-family:var(--f-display); font-weight:900;
+  font-size:clamp(44px, 13vw, 68px); line-height:1.05; letter-spacing:.04em; text-wrap:balance;
+}
+.stripe{height:10px; width:150px; border-radius:5px;
+  background:repeating-linear-gradient(45deg,var(--trim) 0 10px,var(--pit) 10px 20px)}
+.how{margin:0; font-size:18px; max-width:32em}
+.how b{color:var(--trim)}
+
+.rules{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px}
+.rule{
+  background:var(--panel); border:2px solid var(--panel-2); border-radius:16px;
+  padding:12px 8px 10px; display:flex; flex-direction:column; align-items:center; gap:2px; text-align:center;
+}
+.rule .icon{width:64px; height:64px; display:grid; place-items:center}
+.rule .icon svg{width:100%; height:100%}
+.rule .pts{font-family:var(--f-num); font-weight:800; font-size:30px; line-height:1}
+.rule .pts.plus{color:var(--good)} .rule .pts.minus{color:var(--bad)}
+.rule .name{font-weight:700; font-size:15px}
+.rule .note{font-size:13px; color:var(--muted)}
+
+.pick{display:flex; flex-direction:column; gap:8px}
+.pick h2{margin:0; font-size:15px; letter-spacing:.08em; color:var(--muted); font-weight:700}
+.chips{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px}
+.chip{
+  background:var(--panel); border:2px solid var(--panel-2); border-radius:14px;
+  padding:10px 6px; display:flex; flex-direction:column; align-items:center; line-height:1.25;
+}
+.chip .big{font-weight:900; font-size:19px}
+.chip .small{font-size:12.5px; color:var(--muted)}
+.chip[aria-pressed="true"]{background:var(--trim); border-color:var(--trim); color:var(--pit)}
+.chip[aria-pressed="true"] .small{color:var(--pit)}
+
+.go{
+  background:var(--bad); color:var(--cream); border:0; border-radius:20px;
+  font-family:var(--f-display); font-weight:900; font-size:30px; letter-spacing:.2em;
+  padding:14px 0 16px; box-shadow:0 7px 0 var(--bad-dk); transition:transform .08s, box-shadow .08s;
+}
+.go:active{transform:translateY(5px); box-shadow:0 2px 0 var(--bad-dk)}
+.best{margin:0; text-align:center; color:var(--muted); font-size:14px}
+.best b{font-family:var(--f-num); color:var(--cream); font-size:18px}
+.foot{margin:0; font-size:13px; color:var(--muted); text-align:center; text-wrap:balance}
+
+/* ---------- Game ---------- */
+.hud{display:grid; grid-template-columns:1fr 1fr auto; gap:10px; align-items:stretch}
+.stat{background:var(--panel); border-radius:14px; padding:6px 12px; display:flex; flex-direction:column; line-height:1.1}
+.stat .lab{font-size:12px; color:var(--muted); letter-spacing:.1em}
+.stat .val{font-family:var(--f-num); font-weight:800; font-size:32px; font-variant-numeric:tabular-nums}
+.stat .val.bump{animation:bump .25s}
+.stat.hurry .val{color:var(--bad); animation:pulse .5s infinite alternate}
+.tools{display:flex; gap:6px}
+.tool{background:var(--panel); border:2px solid var(--panel-2); border-radius:14px; padding:0 12px; font-size:14px; font-weight:700}
+.bar{height:8px; border-radius:4px; background:var(--panel); overflow:hidden}
+.bar i{display:block; height:100%; background:var(--trim); transform-origin:left; transform:scaleX(1)}
+
+.frame{
+  position:relative; align-self:center;
+  width:min(100%, 520px, calc((100vh - 190px) * .82));
+  width:min(100%, 520px, calc((100dvh - 190px) * .82));
+  padding:9px; border-radius:24px;
+  background:repeating-linear-gradient(45deg,var(--trim) 0 14px,var(--pit) 14px 28px);
+}
+.board{
+  position:relative; overflow:hidden; border-radius:16px;
+  background:linear-gradient(180deg,var(--board-hi),var(--board));
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; padding:10px 10px 4px;
+  touch-action:manipulation; user-select:none; -webkit-user-select:none;
+}
+body.mouse .board{cursor:none}
+.hole{position:relative; aspect-ratio:1/.92; max-width:100%}
+.pit-back,.pit-front{
+  position:absolute; left:8%; right:8%; bottom:6%; height:28%; border-radius:50%;
+  background:var(--pit);
+}
+.pit-back{box-shadow:inset 0 6px 0 rgba(0,0,0,.35), 0 0 0 4px var(--pit-rim)}
+.pit-front{clip-path:inset(50% -6px -6px -6px); box-shadow:0 4px 0 var(--pit-rim); z-index:2}
+.mask{position:absolute; left:0; right:0; top:0; bottom:20%; overflow:hidden; z-index:1; pointer-events:none}
+.pop{
+  position:absolute; left:16%; right:16%; bottom:0; height:82%;
+  transform:translateY(104%); transition:transform .17s ease-out;
+}
+.pop svg{width:100%; height:100%; display:block; transform-origin:50% 100%}
+.hole.up .pop{transform:translateY(0)}
+.hole.is-ghost .pop svg{filter:drop-shadow(0 0 8px var(--ghost-glow))}
+.stars{position:absolute; left:0; right:0; top:2%; text-align:center; color:var(--trim);
+  font-size:18px; letter-spacing:.3em; opacity:0; pointer-events:none}
+.hole.bonk .pop svg{animation:squash .32s ease-out forwards}
+.hole.bonk .stars{opacity:1; animation:spin .6s linear infinite}
+.hole.laugh .pop svg{animation:wobble .35s ease-in-out 2}
+
+.arm-layer{position:absolute; inset:0; width:100%; height:100%; z-index:5; pointer-events:none; overflow:visible}
+.arm-outer{fill:none; stroke:var(--arm-dk); stroke-width:32; stroke-linecap:round}
+.arm-inner{fill:none; stroke:var(--arm); stroke-width:22; stroke-linecap:round}
+.arm-shine{fill:none; stroke:var(--arm-hi); stroke-width:5; stroke-linecap:round; opacity:.75}
+.hammer.grabbed svg{animation:shake .3s}
+
+.float{position:absolute; z-index:8; pointer-events:none; font-family:var(--f-num); font-weight:800; font-size:34px;
+  translate:-50% -50%; animation:rise .7s ease-out forwards; text-shadow:0 3px 0 var(--pit)}
+.float.plus{color:var(--good)} .float.minus{color:var(--bad)}
+.float.small{font-family:var(--f-display); font-size:20px; white-space:nowrap}
+
+.overlay{position:absolute; inset:0; z-index:20; border-radius:24px; background:var(--scrim);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:20px; text-align:center}
+.count{font-family:var(--f-display); font-weight:900; font-size:96px; color:var(--trim); line-height:1}
+.count.word{font-size:54px}
+.over h2{margin:0; font-family:var(--f-display); font-size:26px; font-weight:900}
+.over .score{font-family:var(--f-num); font-weight:800; font-size:76px; line-height:1; color:var(--trim)}
+.over .record{color:var(--good); font-weight:900; font-size:18px}
+.tally{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; font-size:16px}
+.tally b{font-family:var(--f-num); font-size:19px}
+.over .btns{display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:6px}
+.over .go{font-size:22px; letter-spacing:.1em; padding:10px 22px 12px}
+.ghostbtn{background:var(--panel); border:2px solid var(--panel-2); border-radius:18px; padding:10px 18px; font-weight:700}
+
+.hammer{position:fixed; left:0; top:0; width:110px; height:110px; z-index:50; pointer-events:none;
+  transform-origin:50% 96%; rotate:28deg}
+.hammer svg{width:100%; height:100%; display:block}
+.hammer.swing{animation:swing .2s ease-out}
+
+@keyframes swing{0%{rotate:28deg}40%{rotate:-10deg; scale:.94}100%{rotate:28deg}}
+@keyframes squash{0%{transform:scale(1,1)}40%{transform:scale(1.2,.7)}100%{transform:scale(1.05,.8)}}
+@keyframes wobble{0%,100%{transform:rotate(0)}25%{transform:rotate(-10deg)}75%{transform:rotate(10deg)}}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes grab{0%,100%{transform:rotate(-6deg) scale(1)}50%{transform:rotate(6deg) scale(.92,1.04)}}
+@keyframes shake{0%,100%{transform:translateX(0)}30%{transform:translateX(-8px)}70%{transform:translateX(8px)}}
+@keyframes rise{0%{opacity:1; transform:translateY(0) scale(.8)}20%{transform:translateY(-8px) scale(1.15)}100%{opacity:0; transform:translateY(-46px) scale(1)}}
+@keyframes bump{50%{transform:scale(1.18)}}
+@keyframes pulse{to{opacity:.55}}
+@media (prefers-reduced-motion:reduce){
+  .hand.out .palm,.hole.bonk .stars,.stat.hurry .val{animation:none}
+  .pop{transition-duration:.08s}
+}
+@media (max-width:380px){
+  .rule .icon{width:52px; height:52px}
+  .stat .val{font-size:27px}
+}
+*{box-sizing:border-box}
+body{margin:0}
+[hidden]{display:none!important}
+.chips.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.tip,.err{margin:0; font-size:14px}
+.tip b{color:var(--trim)}
+.err{color:var(--bad); font-weight:700}
+.go:disabled{opacity:.7; font-size:22px; letter-spacing:.05em}
+.cam{position:fixed; right:max(12px, env(safe-area-inset-right, 0px)); bottom:max(12px, env(safe-area-inset-bottom, 0px));
+  width:170px; aspect-ratio:4/3; object-fit:cover; transform:scaleX(-1); border:4px solid var(--trim); border-radius:14px; z-index:40; background:var(--pit)}
+.camhint{position:absolute; left:50%; top:12px; translate:-50% 0; z-index:9; background:var(--scrim); color:var(--cream);
+  padding:6px 14px; border-radius:999px; font-weight:700; pointer-events:none; white-space:nowrap}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="wrap">
+
+    <!-- MENU -->
+    <section id="menu" class="wrap">
+      <div class="head">
+        <span class="eyebrow">小設計師的原創遊戲</span>
+        <h1>反應遊戲</h1>
+        <div class="stripe" aria-hidden="true"></div>
+      </div>
+      <p class="how">拿起<b>鎚子</b>，玩偶從洞裡跑出來，就把它<b>打回洞裡</b>！</p>
+
+      <div class="rules">
+        <div class="rule">
+          <div class="icon" data-art="orange"></div>
+          <div class="pts plus">+4</div>
+          <div class="name">玩偶</div>
+          <div class="note">要打它</div>
+        </div>
+        <div class="rule">
+          <div class="icon" data-art="ghost"></div>
+          <div class="pts minus">−2</div>
+          <div class="name">幽靈</div>
+          <div class="note">不能打</div>
+        </div>
+        <div class="rule">
+          <div class="icon" data-art="handIcon"></div>
+          <div class="pts minus">−2</div>
+          <div class="name">搗蛋手</div>
+          <div class="note">會來搶鎚子</div>
+        </div>
+      </div>
+
+      <div class="pick">
+        <h2>操作方式</h2>
+        <div class="chips two" id="modeChips">
+          <button class="chip" id="m-mouse" data-mode="mouse" aria-pressed="true"><span class="big">滑鼠模式</span><span class="small">用滑鼠或手指點</span></button>
+          <button class="chip" id="m-cam" data-mode="cam" aria-pressed="false"><span class="big">體感模式</span><span class="small">用相機看你的手</span></button>
+        </div>
+        <p class="tip" id="camTip" hidden>站在鏡頭前，伸出<b>食指</b>當鎚子，<b>手往下揮一下</b>就是敲。第一次開啟要等幾秒鐘。</p>
+        <p class="err" id="camErr" hidden></p>
+      </div>
+
+      <div class="pick">
+        <h2>難度</h2>
+        <div class="chips" id="diffChips">
+          <button class="chip" id="d-easy" data-diff="easy" aria-pressed="true"><span class="big">簡單</span><span class="small">慢慢出來</span></button>
+          <button class="chip" id="d-normal" data-diff="normal" aria-pressed="false"><span class="big">普通</span><span class="small">有點快</span></button>
+          <button class="chip" id="d-hard" data-diff="hard" aria-pressed="false"><span class="big">困難</span><span class="small">超級快</span></button>
+        </div>
+      </div>
+
+      <div class="pick">
+        <h2>時間</h2>
+        <div class="chips" id="timeChips">
+          <button class="chip" id="t-60" data-time="60" aria-pressed="true"><span class="big">60秒</span><span class="small">1分鐘</span></button>
+          <button class="chip" id="t-120" data-time="120" aria-pressed="false"><span class="big">120秒</span><span class="small">2分鐘</span></button>
+          <button class="chip" id="t-180" data-time="180" aria-pressed="false"><span class="big">180秒</span><span class="small">3分鐘</span></button>
+        </div>
+      </div>
+
+      <button class="go" id="startBtn">開始</button>
+      <p class="best" id="bestLine">這一關的最高分：<b>還沒有</b></p>
+      <p class="foot">現在的玩偶是暫時的替身，等設計師把新角色畫好就換上。</p>
+    </section>
+
+    <!-- GAME -->
+    <section id="game" class="wrap" hidden>
+      <div class="hud">
+        <div class="stat"><span class="lab">分數</span><span class="val" id="scoreVal">0</span></div>
+        <div class="stat" id="timeBox"><span class="lab">剩下（秒）</span><span class="val" id="timeVal">60</span></div>
+        <div class="tools">
+          <button class="tool" id="soundBtn" aria-pressed="true">聲音開</button>
+          <button class="tool" id="quitBtn">結束</button>
+        </div>
+      </div>
+      <div class="bar" aria-hidden="true"><i id="barFill"></i></div>
+
+      <div class="frame">
+        <div class="board" id="board">
+          <svg class="arm-layer" id="armSvg" aria-hidden="true" hidden>
+            <path class="arm-outer" id="armO"/><path class="arm-inner" id="armI"/><path class="arm-shine" id="armS" transform="translate(-5 -2)"/>
+            <g id="palmG"><g transform="translate(-35 -72)"></g></g>
+          </svg>
+        </div>
+
+        <div class="camhint" id="camHint" hidden>把手舉到鏡頭前</div>
+        <div class="overlay" id="countLayer" hidden><div class="count" id="countNum">3</div></div>
+
+        <div class="overlay over" id="overLayer" hidden>
+          <h2>時間到！</h2>
+          <div class="score" id="finalScore">0</div>
+          <div class="record" id="recordLine" hidden>新紀錄！</div>
+          <ul class="tally">
+            <li>打到玩偶 <b id="tDoll">0</b> 隻</li>
+            <li>打到幽靈 <b id="tGhost">0</b> 次</li>
+            <li>碰到搗蛋手 <b id="tHand">0</b> 次</li>
+          </ul>
+          <div class="btns">
+            <button class="go" id="againBtn">再玩一次</button>
+            <button class="ghostbtn" id="menuBtn">換難度</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<video class="cam" id="cam" playsinline muted hidden></video>
+
+<div class="hammer" id="hammer" hidden aria-hidden="true">
+  <svg viewBox="0 0 100 100">
+    <rect x="45" y="30" width="10" height="66" rx="5" fill="#B9773E"/>
+    <rect x="47" y="32" width="3" height="60" rx="1.5" fill="#D9995C"/>
+    <rect x="20" y="8" width="60" height="28" rx="8" fill="#E8463A"/>
+    <rect x="20" y="8" width="60" height="9" rx="4" fill="#FF7A6B"/>
+    <rect x="28" y="8" width="6" height="28" fill="#FFC93C"/>
+    <rect x="66" y="8" width="6" height="28" fill="#FFC93C"/>
+  </svg>
+</div>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+
+  // ---------- Original stand-in characters ----------
+  const ART = {
+    orange: `<svg viewBox="0 0 100 100" aria-hidden="true">
+      <circle cx="22" cy="34" r="10" fill="#FF9F43"/><circle cx="78" cy="34" r="10" fill="#FF9F43"/>
+      <circle cx="22" cy="34" r="4.5" fill="#D9742A"/><circle cx="78" cy="34" r="4.5" fill="#D9742A"/>
+      <ellipse cx="50" cy="66" rx="40" ry="38" fill="#FF9F43"/>
+      <circle cx="36" cy="58" r="10" fill="#fff"/><circle cx="64" cy="58" r="10" fill="#fff"/>
+      <circle cx="38" cy="60" r="5" fill="#1C1940"/><circle cx="62" cy="60" r="5" fill="#1C1940"/>
+      <circle cx="26" cy="73" r="5" fill="#FF6B5B" opacity=".6"/><circle cx="74" cy="73" r="5" fill="#FF6B5B" opacity=".6"/>
+      <path d="M40 78 q10 9 20 0" stroke="#1C1940" stroke-width="4" fill="none" stroke-linecap="round"/>
+    </svg>`,
+    robot: `<svg viewBox="0 0 100 100" aria-hidden="true">
+      <line x1="50" y1="30" x2="50" y2="14" stroke="#8FD3FF" stroke-width="5"/>
+      <circle cx="50" cy="11" r="6.5" fill="#FFC93C"/>
+      <rect x="14" y="28" width="72" height="76" rx="16" fill="#8FD3FF"/>
+      <rect x="24" y="40" width="52" height="34" rx="9" fill="#173A57"/>
+      <rect x="33" y="49" width="10" height="13" rx="3" fill="#8CF08C"/>
+      <rect x="57" y="49" width="10" height="13" rx="3" fill="#8CF08C"/>
+      <rect x="38" y="83" width="24" height="6" rx="3" fill="#173A57"/>
+      <circle cx="20" cy="56" r="3" fill="#5BA9D6"/><circle cx="80" cy="56" r="3" fill="#5BA9D6"/>
+    </svg>`,
+    sock: `<svg viewBox="0 0 100 100" aria-hidden="true">
+      <path d="M20 104 V36 a30 30 0 0 1 60 0 V104 Z" fill="#FF8FB8"/>
+      <rect x="20" y="72" width="60" height="8" fill="#FFF4E0"/>
+      <rect x="20" y="88" width="60" height="8" fill="#FFF4E0"/>
+      <circle cx="37" cy="44" r="9" fill="#1C1940"/><circle cx="63" cy="44" r="9" fill="#1C1940"/>
+      <circle cx="35" cy="42" r="1.8" fill="#FFF4E0"/><circle cx="39" cy="46" r="1.8" fill="#FFF4E0"/>
+      <circle cx="61" cy="42" r="1.8" fill="#FFF4E0"/><circle cx="65" cy="46" r="1.8" fill="#FFF4E0"/>
+      <path d="M42 59 q8 7 16 0" stroke="#1C1940" stroke-width="4" fill="none" stroke-linecap="round"/>
+    </svg>`,
+    ghost: `<svg viewBox="0 0 100 100" aria-hidden="true">
+      <path d="M16 104 V46 a34 34 0 0 1 68 0 V104 Z" fill="#EEF2FF" opacity=".95"/>
+      <ellipse cx="37" cy="48" rx="7" ry="10" fill="#1C1940"/><ellipse cx="63" cy="48" rx="7" ry="10" fill="#1C1940"/>
+      <circle cx="35" cy="44" r="2.4" fill="#fff"/><circle cx="61" cy="44" r="2.4" fill="#fff"/>
+      <circle cx="27" cy="64" r="5" fill="#A9BFFF" opacity=".8"/><circle cx="73" cy="64" r="5" fill="#A9BFFF" opacity=".8"/>
+      <path d="M40 66 q10 6 20 0" stroke="#1C1940" stroke-width="4" fill="none" stroke-linecap="round"/>
+      <path d="M50 69 v7 a5 5 0 0 0 10 0 v-9" fill="#FF8FB8"/>
+    </svg>`,
+    hand: `<svg viewBox="0 0 72 80" aria-hidden="true">
+      <rect x="9" y="6" width="11" height="40" rx="5.5" fill="#9B6BFF"/>
+      <rect x="22" y="1" width="11" height="44" rx="5.5" fill="#9B6BFF"/>
+      <rect x="35" y="3" width="11" height="42" rx="5.5" fill="#9B6BFF"/>
+      <rect x="48" y="10" width="11" height="36" rx="5.5" fill="#9B6BFF"/>
+      <rect x="9" y="30" width="50" height="40" rx="14" fill="#9B6BFF"/>
+      <rect x="54" y="38" width="11" height="26" rx="5.5" fill="#9B6BFF" transform="rotate(-38 59 51)"/>
+      <rect x="21" y="40" width="3" height="16" rx="1.5" fill="#6A43C8" opacity=".6"/>
+      <rect x="10" y="64" width="50" height="12" rx="4" fill="#FFC93C"/>
+    </svg>`
+  };
+  ART.handIcon = ART.hand;
+  const DOLLS = ['orange', 'robot', 'sock'];
+  document.querySelectorAll('[data-art]').forEach(el => { el.innerHTML = ART[el.dataset.art]; });
+
+  // ---------- Settings (how long things stay up) ----------
+  const DIFF = {
+    easy:   { up: 1500, gap: [700, 1100], max: 2, ghost: .20, hand: [6000, 9000], handStay: 3500, handSpeed: 120 },
+    normal: { up: 1050, gap: [500, 850],  max: 3, ghost: .25, hand: [4500, 7000], handStay: 4000, handSpeed: 175 },
+    hard:   { up: 720,  gap: [320, 600],  max: 4, ghost: .30, hand: [3000, 5000], handStay: 4500, handSpeed: 240 }
+  };
+  const DIFF_NAME = { easy: '簡單', normal: '普通', hard: '困難' };
+  let diff = 'easy', dur = 60, mode = 'mouse', onGame = false;
+
+  const S = { running: false, score: 0, hits: { doll: 0, ghost: 0, hand: 0 }, timers: new Set(), start: 0, raf: 0, handHide: null };
+  const later = (fn, ms) => { const id = setTimeout(() => { S.timers.delete(id); fn(); }, ms); S.timers.add(id); return id; };
+  const clearLater = id => { clearTimeout(id); S.timers.delete(id); };
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  // ---------- Best scores ----------
+  const bestKey = () => `fanying-best-${diff}-${dur}`;
+  const getBest = () => { try { const v = localStorage.getItem(bestKey()); return v === null ? null : Number(v); } catch (e) { return null; } };
+  const setBest = v => { try { localStorage.setItem(bestKey(), String(v)); } catch (e) {} };
+  function showBest() {
+    const b = getBest();
+    $('#bestLine').innerHTML = `${DIFF_NAME[diff]}・${dur}秒的最高分：<b>${b === null ? '還沒有' : b}</b>`;
+  }
+
+  // ---------- Menu chips ----------
+  function wireChips(box, attr, set) {
+    box.addEventListener('click', e => {
+      const b = e.target.closest('.chip'); if (!b) return;
+      box.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', c === b ? 'true' : 'false'));
+      set(b.dataset[attr]); showBest();
+    });
+  }
+  wireChips($('#diffChips'), 'diff', v => diff = v);
+  wireChips($('#timeChips'), 'time', v => dur = Number(v));
+  wireChips($('#modeChips'), 'mode', v => { mode = v; $('#camTip').hidden = v !== 'cam'; $('#camErr').hidden = true; });
+  showBest();
+
+  // ---------- Sound ----------
+  let ac = null, soundOn = true;
+  function ensureAudio() {
+    try { if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)(); if (ac.state === 'suspended') ac.resume(); }
+    catch (e) { ac = null; }
+  }
+  function tone(type, f1, f2, d, vol) {
+    if (!ac || !soundOn) return;
+    const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f1, t); o.frequency.exponentialRampToValueAtTime(f2, t + d);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.001, t + d);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .03);
+  }
+  const sfx = {
+    bonk: () => { tone('triangle', 640, 150, .15, .28); },
+    bad: () => { tone('square', 230, 110, .28, .08); },
+    thud: () => tone('sine', 150, 70, .08, .15),
+    whoosh: () => tone('sawtooth', 160, 520, .3, .035),
+    beep: hi => tone('sine', hi ? 900 : 540, hi ? 900 : 540, .16, .13),
+    end: () => { tone('triangle', 520, 520, .14, .2); setTimeout(() => tone('triangle', 780, 780, .3, .2), 160); }
+  };
+  $('#soundBtn').addEventListener('click', e => {
+    soundOn = !soundOn; e.currentTarget.textContent = soundOn ? '聲音開' : '聲音關';
+    e.currentTarget.setAttribute('aria-pressed', soundOn ? 'true' : 'false');
+  });
+
+  // ---------- Board ----------
+  const board = $('#board'), armSvg = $('#armSvg');
+  const holes = [];
+  for (let i = 0; i < 12; i++) {
+    const el = document.createElement('div');
+    el.className = 'hole'; el.dataset.i = i;
+    el.innerHTML = '<div class="pit-back"></div><div class="mask"><div class="pop"></div></div><div class="pit-front"></div>';
+    board.insertBefore(el, armSvg);
+    holes.push({ el, pop: el.querySelector('.pop'), type: null, live: false, t: null });
+  }
+
+  function resetHole(h) {
+    h.type = null; h.live = false; h.t = null;
+    h.el.classList.remove('up', 'bonk', 'laugh', 'is-ghost'); h.pop.innerHTML = '';
+  }
+
+  function spawn() {
+    if (!S.running) return;
+    const d = DIFF[diff];
+    if (holes.filter(h => h.type).length < d.max) {
+      const free = holes.filter(h => !h.type);
+      const h = free[Math.floor(Math.random() * free.length)];
+      const ghost = Math.random() < d.ghost;
+      const kind = ghost ? 'ghost' : DOLLS[Math.floor(Math.random() * DOLLS.length)];
+      h.type = ghost ? 'ghost' : 'doll'; h.live = true;
+      h.pop.innerHTML = ART[kind] + (ghost ? '' : '<span class="stars" aria-hidden="true">★★</span>');
+      h.el.classList.remove('bonk', 'laugh');
+      h.el.classList.toggle('is-ghost', ghost);
+      void h.el.offsetWidth;
+      h.el.classList.add('up');
+      h.t = later(() => retract(h), d.up * (ghost ? 1.15 : 1));
+    }
+    later(spawn, rand(d.gap[0], d.gap[1]));
+  }
+
+  function retract(h, delay) {
+    h.live = false;
+    if (h.t) { clearLater(h.t); h.t = null; }
+    const go = () => { h.el.classList.remove('up'); later(() => resetHole(h), 220); };
+    delay ? later(go, delay) : go();
+  }
+
+  // ---------- Mischief hand: a wiggly arm that chases the hammer ----------
+  const armO = $('#armO'), armI = $('#armI'), armS = $('#armS'), palmG = $('#palmG');
+  palmG.firstElementChild.innerHTML = ART.hand.replace(/^\s*<svg[^>]*>|<\/svg>\s*$/g, '');
+  const H = { phase: 'off', base: { x: 0, y: 0 }, p: { x: 0, y: 0 }, start: { x: 0, y: 0 }, until: 0, shake: 0 };
+  const ptr = { x: 0, y: 0, on: false, mouse: false };
+  let lastTap = null, G = null, BW = 0, BH = 0;
+
+  function measure() { BW = board.clientWidth; BH = board.clientHeight; armSvg.setAttribute('viewBox', `0 0 ${BW} ${BH}`); }
+  window.addEventListener('resize', measure);
+
+  function scheduleHand() { const d = DIFF[diff]; later(showHand, rand(d.hand[0], d.hand[1])); }
+  function showHand() {
+    if (!S.running) return;
+    measure();
+    const bx = rand(BW * .15, BW * .85);
+    H.base = { x: bx, y: BH + 30 }; H.p = { x: bx, y: BH + 30 };
+    H.start = { x: bx + rand(-40, 40), y: BH * rand(.4, .6) };
+    H.phase = 'in'; H.until = performance.now() + DIFF[diff].handStay;
+    armSvg.removeAttribute('hidden'); sfx.whoosh();
+  }
+  function hideHandNow() { H.phase = 'off'; G = null; armSvg.setAttribute('hidden', ''); }
+
+  function moveToward(p, t, step) {
+    const dx = t.x - p.x, dy = t.y - p.y, d = Math.hypot(dx, dy);
+    if (d <= step) { p.x = t.x; p.y = t.y; return true; }
+    p.x += dx / d * step; p.y += dy / d * step; return false;
+  }
+  const holeCenter = h => ({ x: h.el.offsetLeft + h.el.offsetWidth / 2, y: h.el.offsetTop + h.el.offsetHeight * .55 });
+  function handTarget(now) {
+    if ((ptr.mouse || mode === 'cam') && ptr.on) return { x: ptr.x, y: ptr.y };          // chase the hammer
+    if (lastTap && now - lastTap.t < 1500) return lastTap;          // go where the last tap was
+    let best = null, bd = 1e9;                                       // otherwise block a doll
+    holes.forEach(h => {
+      if (h.live && h.type === 'doll') { const c = holeCenter(h), d = Math.hypot(c.x - H.p.x, c.y - H.p.y); if (d < bd) { bd = d; best = c; } }
+    });
+    return best || { x: BW / 2 + Math.sin(now / 600) * BW * .3, y: BH * .45 };
+  }
+
+  function geom(now) {
+    const B = H.base, P = { x: H.p.x + Math.sin(now / 170) * 5, y: H.p.y + Math.cos(now / 210) * 4 };
+    if (H.shake > now) P.x += Math.sin(now / 18) * 7;
+    const dx = P.x - B.x, dy = P.y - B.y, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
+    const amp = Math.min(60, len * .25), w = now / 260;
+    const c1 = { x: B.x + dx * .33 + nx * amp * Math.sin(w), y: B.y + dy * .33 + ny * amp * Math.sin(w) };
+    const c2 = { x: B.x + dx * .7 - nx * amp * Math.sin(w + 1.3), y: B.y + dy * .7 - ny * amp * Math.sin(w + 1.3) };
+    return { B, P, c1, c2, ang: Math.atan2(P.y - c2.y, P.x - c2.x) };
+  }
+  function bez(g, t) {
+    const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+    return { x: a * g.B.x + b * g.c1.x + c * g.c2.x + d * g.P.x, y: a * g.B.y + b * g.c1.y + c * g.c2.y + d * g.P.y };
+  }
+  const palmCenter = g => ({ x: g.P.x + Math.cos(g.ang) * 30, y: g.P.y + Math.sin(g.ang) * 30 });
+
+  function renderHand(now) {
+    G = geom(now);
+    const d = `M${G.B.x} ${G.B.y} C${G.c1.x} ${G.c1.y} ${G.c2.x} ${G.c2.y} ${G.P.x} ${G.P.y}`;
+    armO.setAttribute('d', d); armI.setAttribute('d', d); armS.setAttribute('d', d);
+    palmG.setAttribute('transform', `translate(${G.P.x} ${G.P.y}) rotate(${G.ang * 180 / Math.PI + 90})`);
+  }
+
+  function updateHand(dt, now) {
+    if (H.phase === 'off') return;
+    const d = DIFF[diff];
+    if (H.phase === 'in') {
+      if (moveToward(H.p, H.start, 650 * dt)) H.phase = 'chase';
+    } else if (H.phase === 'chase') {
+      const T = handTarget(now);
+      moveToward(H.p, { x: T.x, y: T.y + 28 }, d.handSpeed * dt);
+      const dx = H.p.x - H.base.x, dy = H.p.y - H.base.y, L = Math.hypot(dx, dy), max = BH * 1.05;
+      if (L > max) { H.p.x = H.base.x + dx / L * max; H.p.y = H.base.y + dy / L * max; }
+      if (now > H.until) H.phase = 'out';
+    } else if (H.phase === 'out') {
+      if (moveToward(H.p, H.base, 750 * dt)) { hideHandNow(); if (S.running) scheduleHand(); return; }
+    }
+    renderHand(now);
+    if (H.phase === 'chase' && (ptr.mouse || mode === 'cam') && ptr.on) {
+      const c = palmCenter(G);
+      if (Math.hypot(c.x - ptr.x, c.y - ptr.y) < 30) handPenalty(ptr.x, ptr.y, '鎚子被抓到了！');
+    }
+  }
+
+  function handHitAt(x, y) {
+    if (!G || (H.phase !== 'chase' && H.phase !== 'in')) return false;
+    const c = palmCenter(G);
+    if (Math.hypot(c.x - x, c.y - y) < 38) return true;
+    for (let t = 0; t <= 1; t += .05) { const q = bez(G, t); if (Math.hypot(q.x - x, q.y - y) < 18) return true; }
+    return false;
+  }
+  function handPenalty(x, y, msg) {
+    S.hits.hand++; addScore(-2, x, y); sfx.bad();
+    H.shake = performance.now() + 260; H.phase = 'out';
+    hammer.classList.remove('grabbed'); void hammer.offsetWidth; hammer.classList.add('grabbed');
+    if (msg) floatAt(msg, 'minus small', x, y - 36);
+  }
+
+  // ---------- Scoring ----------
+  const scoreVal = $('#scoreVal');
+  function addScore(v, x, y) {
+    S.score += v;
+    scoreVal.textContent = S.score;
+    scoreVal.classList.remove('bump'); void scoreVal.offsetWidth; scoreVal.classList.add('bump');
+    floatAt((v > 0 ? '+' : '−') + Math.abs(v), v > 0 ? 'plus' : 'minus', x, y);
+  }
+  function floatAt(text, cls, x, y) {
+    const f = document.createElement('div');
+    f.className = 'float ' + cls;
+    f.textContent = text;
+    f.style.left = x + 'px'; f.style.top = y + 'px';
+    board.appendChild(f);
+    setTimeout(() => f.remove(), 750);
+  }
+
+  function strikeAt(bx, by) {
+    if (handHitAt(bx, by)) { handPenalty(bx, by, '打到搗蛋手！'); return; }
+    const h = holes.find(o => { const el = o.el; return bx >= el.offsetLeft && bx <= el.offsetLeft + el.offsetWidth && by >= el.offsetTop && by <= el.offsetTop + el.offsetHeight; });
+    if (!h || !h.live) { sfx.thud(); return; }
+    if (h.type === 'doll') {
+      S.hits.doll++; addScore(4, bx, by); sfx.bonk();
+      h.el.classList.add('bonk'); retract(h, 360);
+    } else {
+      S.hits.ghost++; addScore(-2, bx, by); sfx.bad();
+      h.el.classList.add('laugh'); retract(h, 450);
+    }
+  }
+  board.addEventListener('pointerdown', e => {
+    if (!S.running || mode === 'cam') return;
+    e.preventDefault();
+    swingAt(e.clientX, e.clientY, e.pointerType);
+    const r = board.getBoundingClientRect(), bx = e.clientX - r.left, by = e.clientY - r.top;
+    if (e.pointerType !== 'mouse') lastTap = { x: bx, y: by, t: performance.now() };
+    strikeAt(bx, by);
+  });
+
+  // ---------- Hammer ----------
+  const hammer = $('#hammer'); let hammerHide = 0;
+  const placeHammer = (x, y) => { hammer.style.translate = `${x - 44}px ${y - 27}px`; };
+  function swingAt(x, y, type) {
+    placeHammer(x, y); hammer.hidden = false;
+    hammer.classList.remove('swing'); void hammer.offsetWidth; hammer.classList.add('swing');
+    if (type !== 'mouse' && type !== 'cam') { clearTimeout(hammerHide); hammerHide = setTimeout(() => { hammer.hidden = true; }, 420); }
+  }
+  document.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'mouse' || mode === 'cam') return;
+    document.body.classList.add('mouse'); ptr.mouse = true;
+    const r = board.getBoundingClientRect();
+    ptr.x = e.clientX - r.left; ptr.y = e.clientY - r.top;
+    ptr.on = S.running && ptr.x >= 0 && ptr.y >= 0 && ptr.x <= r.width && ptr.y <= r.height;
+    if (ptr.on) { placeHammer(e.clientX, e.clientY); hammer.hidden = false; }
+    else hammer.hidden = true;
+  });
+
+  // ---------- Camera mode (hand tracking) ----------
+  const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+  const MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+  const video = $('#cam'), camHint = $('#camHint');
+  let landmarker = null, stream = null, camRaf = 0, lastVT = -1, lastWhack = 0;
+  const hist = [], sm = { x: 0, y: 0, ok: false };
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+
+  async function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('這個瀏覽器不能用相機，請用電腦的 Chrome 開啟這個檔案。');
+    if (!stream) {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
+      video.srcObject = stream; await video.play();
+    }
+    if (!landmarker) {
+      const vision = await import(MP + '/vision_bundle.mjs');
+      const files = await vision.FilesetResolver.forVisionTasks(MP + '/wasm');
+      const opts = d => ({ baseOptions: { modelAssetPath: MODEL, delegate: d }, runningMode: 'VIDEO', numHands: 1 });
+      try { landmarker = await vision.HandLandmarker.createFromOptions(files, opts('GPU')); }
+      catch (e) { landmarker = await vision.HandLandmarker.createFromOptions(files, opts('CPU')); }
+    }
+    video.hidden = false;
+    camLoop();
+  }
+  function stopCamera() {
+    cancelAnimationFrame(camRaf);
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    video.hidden = true; camHint.hidden = true; sm.ok = false; ptr.on = false; hist.length = 0;
+  }
+  function camLoop() {
+    cancelAnimationFrame(camRaf);
+    const step = () => {
+      if (mode !== 'cam' || !stream) return;
+      if (video.readyState >= 2 && video.currentTime !== lastVT) {
+        lastVT = video.currentTime;
+        const now = performance.now();
+        let res = null;
+        try { res = landmarker.detectForVideo(video, now); } catch (e) {}
+        const lm = res && res.landmarks && res.landmarks[0];
+        const r = board.getBoundingClientRect();
+        if (lm) {
+          const tip = lm[8];                                  // index fingertip
+          const tx = clamp01(((1 - tip.x) - .12) / .76) * r.width;   // mirrored, centre of the frame fills the board
+          const ty = clamp01((tip.y - .1) / .75) * r.height;
+          if (!sm.ok) { sm.x = tx; sm.y = ty; sm.ok = true; } else { sm.x += (tx - sm.x) * .55; sm.y += (ty - sm.y) * .55; }
+          ptr.x = sm.x; ptr.y = sm.y; ptr.on = true;
+          hist.push({ x: sm.x, y: sm.y, t: now });
+          while (hist.length && now - hist[0].t > 260) hist.shift();
+          if (onGame) { placeHammer(r.left + sm.x, r.top + sm.y); hammer.hidden = false; }
+          if (S.running) detectWhack(now, r);
+          camHint.hidden = true;
+        } else {
+          sm.ok = false; ptr.on = false; hist.length = 0; hammer.hidden = true;
+          camHint.hidden = !onGame;
+        }
+      }
+      camRaf = requestAnimationFrame(step);
+    };
+    camRaf = requestAnimationFrame(step);
+  }
+  function detectWhack(now, r) {
+    if (now - lastWhack < 380 || hist.length < 3) return;
+    let past = hist[0];
+    for (const h of hist) if (now - h.t >= 110) past = h;
+    const dt = (now - past.t) / 1000;
+    if (dt < .06) return;
+    if ((sm.y - past.y) / dt > r.height * 1.2) {        // a quick downward swing
+      lastWhack = now;
+      const aim = hist[0];                              // where the hammer was before the swing
+      swingAt(r.left + aim.x, r.top + aim.y, 'cam');
+      strikeAt(aim.x, aim.y);
+      hist.length = 0;
+    }
+  }
+
+  // ---------- Timer ----------
+  const timeVal = $('#timeVal'), timeBox = $('#timeBox'), barFill = $('#barFill');
+  function tick() {
+    if (!S.running) return;
+    const now = performance.now(), dt = Math.min(.05, (now - S.last) / 1000); S.last = now;
+    updateHand(dt, now);
+    const total = dur * 1000, left = Math.max(0, total - (now - S.start));
+    timeVal.textContent = Math.ceil(left / 1000);
+    barFill.style.transform = `scaleX(${left / total})`;
+    timeBox.classList.toggle('hurry', left <= 10000);
+    if (left <= 0) { finish(); return; }
+    S.raf = requestAnimationFrame(tick);
+  }
+
+  // ---------- Flow ----------
+  function stopAll() {
+    S.running = false;
+    cancelAnimationFrame(S.raf);
+    S.timers.forEach(id => clearTimeout(id)); S.timers.clear();
+    holes.forEach(resetHole);
+    hideHandNow(); lastTap = null;
+    hammer.hidden = true;
+  }
+
+  function newRound() {
+    stopAll();
+    S.score = 0; S.hits = { doll: 0, ghost: 0, hand: 0 };
+    scoreVal.textContent = '0'; timeVal.textContent = dur;
+    barFill.style.transform = 'scaleX(1)'; timeBox.classList.remove('hurry');
+    $('#overLayer').hidden = true;
+    const layer = $('#countLayer'), num = $('#countNum');
+    layer.hidden = false;
+    const steps = ['3', '2', '1', '開始！'];
+    steps.forEach((s, i) => later(() => {
+      num.textContent = s; num.classList.toggle('word', i === 3); sfx.beep(i === 3);
+    }, i * 650));
+    later(() => { layer.hidden = true; begin(); }, steps.length * 650);
+  }
+
+  function begin() {
+    measure();
+    S.running = true; S.start = S.last = performance.now();
+    tick();
+    later(spawn, 350);
+    scheduleHand();
+  }
+
+  function finish() {
+    stopAll(); sfx.end();
+    const best = getBest();
+    const isRecord = best === null || S.score > best;
+    if (isRecord) setBest(S.score);
+    $('#finalScore').textContent = S.score;
+    $('#recordLine').hidden = !(isRecord && S.score > 0);
+    $('#tDoll').textContent = S.hits.doll;
+    $('#tGhost').textContent = S.hits.ghost;
+    $('#tHand').textContent = S.hits.hand;
+    $('#overLayer').hidden = false;
+  }
+
+  function toMenu() {
+    stopAll(); stopCamera(); onGame = false;
+    $('#countLayer').hidden = true; $('#overLayer').hidden = true;
+    $('#game').hidden = true; $('#menu').hidden = false;
+    showBest(); window.scrollTo(0, 0);
+  }
+
+  $('#startBtn').addEventListener('click', async () => {
+    ensureAudio();
+    const btn = $('#startBtn'), err = $('#camErr');
+    err.hidden = true;
+    if (mode === 'cam') {
+      btn.disabled = true; btn.textContent = '開啟相機中…';
+      try { await startCamera(); }
+      catch (e) {
+        stopCamera();
+        err.textContent = '沒辦法開啟相機：' + (e && e.name === 'NotAllowedError'
+          ? '請允許這個網頁使用相機，再按一次開始。'
+          : (e && e.message && !/^[A-Za-z]/.test(e.message) ? e.message : '請確認鏡頭有接好、網路有連上，再試一次。'));
+        err.hidden = false; btn.disabled = false; btn.textContent = '開始';
+        return;
+      }
+      btn.disabled = false; btn.textContent = '開始';
+    } else stopCamera();
+    onGame = true;
+    $('#menu').hidden = true; $('#game').hidden = false; window.scrollTo(0, 0);
+    newRound();
+  });
+  $('#againBtn').addEventListener('click', () => { ensureAudio(); newRound(); });
+  $('#menuBtn').addEventListener('click', toMenu);
+  $('#quitBtn').addEventListener('click', toMenu);
+})();
+</script>
+</body>
+</html>
